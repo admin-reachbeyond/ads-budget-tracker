@@ -195,7 +195,7 @@ function sym() { return document.getElementById('currency').value; }
 function fmt(n) { return (n < 0 ? '-' : '') + sym() + Math.round(Math.abs(n)).toLocaleString(); }
 function fmtD(n) { return fmt(n) + '/day'; }
 function daysInMonth() { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); }
-function daysLeft() { return daysInMonth() - new Date().getDate(); }
+function function daysLeft() { return daysInMonth() - new Date().getDate() + 1; }
 function expectedPct() { return (new Date().getDate() / daysInMonth()) * 100; }
 
 function setStatus(msg, state) {
