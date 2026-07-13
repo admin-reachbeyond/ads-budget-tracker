@@ -220,13 +220,15 @@ function toggleRaw() {
 }
 
 async function fetchData() {
-  const url = document.getElementById('scriptUrl').value.trim();
-  if (!url) { setStatus('Paste your Apps Script URL above.', 'err'); return; }
+  const urlBase = document.getElementById('scriptUrl').value.trim();
+  if (!urlBase) { setStatus('Paste your Apps Script URL above.', 'err'); return; }
   persist();
   setStatus('Fetching…', 'busy');
   lastRaw = '';
+  // Cache-bust: unique param each call + no-store so the browser never serves a stale response
+  const url = urlBase + (urlBase.includes('?') ? '&' : '?') + '_ts=' + Date.now();
   try {
-    const res = await fetch(url, { redirect: 'follow' });
+    const res = await fetch(url, { redirect: 'follow', cache: 'no-store' });
     const text = await res.text();
     lastRaw = text;
     if (document.getElementById('rawBox').style.display === 'block')
