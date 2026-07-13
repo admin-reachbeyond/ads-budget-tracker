@@ -355,6 +355,7 @@ function renderTable() {
             style="display:none;width:100%" />
         </div>
       </td>
+      <td>${c.allocatedDailyBudget ? fmtD(c.allocatedDailyBudget) : '—'}</td>
       <td>${fmt(c.spent)}</td>
       <td><span class="badge ${varClass}">${c.varD >= 0 ? '+' : ''}${fmt(c.varD)}</span></td>
       <td><span class="badge ${pctClass}">${pctR}%</span></td>
