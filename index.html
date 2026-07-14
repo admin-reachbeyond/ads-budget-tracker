@@ -65,7 +65,7 @@ tbody tr:hover td { background: var(--bg); }
 .b-ok    { background: var(--green-bg); color: var(--green); }
 .b-warn  { background: var(--amber-bg); color: var(--amber); }
 .b-over  { background: var(--red-bg);   color: var(--red);   }
-.b-ahead { background: var(--teal-bg);  color: var(--teal);  }
+.b-ahead { background: var(--red-bg);   color: var(--red);   }
 .b-na    { background: var(--bg);       color: var(--faint); }
 .bar-wrap { height: 4px; background: var(--border); border-radius: 2px; margin-top: 5px; overflow: hidden; min-width: 80px; }
 .bar-fill { height: 100%; border-radius: 2px; }
@@ -324,7 +324,7 @@ function renderTable() {
 
   data.forEach(c => {
     const pctR = Math.round(c.pctUsed);
-    const barColor = c.pctUsed >= 100 ? '#E24B4A' : c.pctUsed >= 80 ? '#EF9F27' : '#639922';
+    const barColor = c.label === 'Ahead' ? '#E24B4A' : c.pctUsed >= 100 ? '#E24B4A' : c.pctUsed >= 80 ? '#EF9F27' : '#639922';
     const varClass = c.varD >= 0 ? 'b-ok' : 'b-over';
     const pctClass = c.pctUsed >= 100 ? 'b-over' : c.pctUsed >= 80 ? 'b-warn' : 'b-ok';
 
