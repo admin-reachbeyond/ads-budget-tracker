@@ -270,7 +270,7 @@ function calculate() {
 
     const varD = ab - s;
     const pctUsed = ab > 0 ? (s / ab) * 100 : 0;
-    const pace = pctUsed - exp;
+    const pace = Math.round(pctUsed) - Math.round(exp);
     let label, cls;
     if (!ab)               { label = 'No budget'; cls = 'b-na'; }
     else if (Math.abs(pace) <= 2) { label = 'On track';  cls = 'b-ok'; }
