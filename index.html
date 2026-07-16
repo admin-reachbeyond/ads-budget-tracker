@@ -273,8 +273,8 @@ function calculate() {
     const pace = pctUsed - exp;
     let label, cls;
     if (!ab)               { label = 'No budget'; cls = 'b-na'; }
-    else if (Math.abs(pace) <= 5) { label = 'On track';  cls = 'b-ok'; }
-    else if (pace > 5)     { label = 'Ahead';     cls = 'b-ahead'; }
+    else if (Math.abs(pace) <= 2) { label = 'On track';  cls = 'b-ok'; }
+    else if (pace > 2)     { label = 'Ahead';     cls = 'b-ahead'; }
     else                   { label = 'Behind';    cls = 'b-warn'; }
     const dailyNeeded = dl > 0 && ab > 0 ? Math.max(0, (ab - s) / dl) : 0;
     return { ...loc, platformBudget: pb, allocatedBudget: ab, spent: s, varD, pctUsed, pace, label, cls, dailyNeeded };
