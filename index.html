@@ -80,6 +80,10 @@ tbody tr:hover td { background: var(--bg); }
 .leg { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
 .leg-sq { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 .sync-info { font-size: 12px; color: var(--faint); }
+.unmatched-banner { background: var(--amber-bg); border: 1px solid #e8c98a; border-radius: var(--radius); padding: 12px 16px; margin-bottom: 1.25rem; display: none; }
+.unmatched-banner .ub-title { font-size: 13px; font-weight: 600; color: var(--amber); margin-bottom: 4px; }
+.unmatched-banner .ub-detail { font-size: 12px; color: var(--amber); opacity: .9; }
+.unmatched-banner .ub-list { margin-top: 8px; font-size: 11px; color: var(--amber); opacity: .85; }
 @media (max-width: 900px) { .metrics { grid-template-columns: 1fr 1fr; } .main { padding: 1rem; } }
 </style>
 </head>
@@ -102,7 +106,7 @@ tbody tr:hover td { background: var(--bg); }
     <div class="grid2">
       <div>
         <div class="field-label">Master Apps Script URL</div>
-        <input id="scriptUrl" value="https://script.google.com/macros/s/AKfycbzgscXrAPt_ooKGP_1ukdBQt1GoXu0UqJQOepNs1Sr5e1CFzjcfVRHofDPBWiK_Mfc9Gw/exec" />
+        <input id="scriptUrl" value="https://script.google.com/macros/s/AKfycbymwQCIIvsx_FDHdxhaGXUPVPQUJ_c89ixz1DFLMcsrRXUqW-zadNI7E_oi_ZHhg9zcUg/exec" />
       </div>
       <div>
         <div class="field-label">Currency</div>
@@ -121,6 +125,13 @@ tbody tr:hover td { background: var(--bg); }
     </div>
     <div class="raw-box" id="rawBox"></div>
     <p class="hint">Open this file in Chrome. Data auto-loads on open. Allocated budgets are saved in your browser — enter them once and they persist. Microsoft Ads spend will be added once the email reader is set up.</p>
+  </div>
+
+  <!-- Unmatched spend warning -->
+  <div class="unmatched-banner" id="unmatchedBanner">
+    <div class="ub-title">⚠ Unmatched campaign spend detected</div>
+    <div class="ub-detail" id="unmatchedDetail"></div>
+    <div class="ub-list" id="unmatchedList"></div>
   </div>
 
   <!-- Summary metrics -->
@@ -223,6 +234,21 @@ function toggleRaw() {
   box.textContent = lastRaw || 'No response yet.';
 }
 
+function renderUnmatchedBanner(unmatchedCost, unmatchedCampaigns) {
+  const banner = document.getElementById('unmatchedBanner');
+  if (!unmatchedCost || unmatchedCost <= 0) {
+    banner.style.display = 'none';
+    return;
+  }
+  banner.style.display = 'block';
+  document.getElementById('unmatchedDetail').textContent =
+    fmt(unmatchedCost) + ' in campaign spend could not be matched to a location and is excluded from the totals below.';
+  const list = (unmatchedCampaigns || []).slice(0, 8).map(c =>
+    `${c.name}${c.source ? ' (' + c.source + ')' : ''} — ${fmt(c.cost)}`
+  ).join(' · ');
+  document.getElementById('unmatchedList').textContent = list;
+}
+
 async function fetchData() {
   const urlBase = document.getElementById('scriptUrl').value.trim();
   if (!urlBase) { setStatus('Paste your Apps Script URL above.', 'err'); return; }
@@ -238,17 +264,32 @@ async function fetchData() {
     if (document.getElementById('rawBox').style.display === 'block')
       document.getElementById('rawBox').textContent = text;
     if (!res.ok) { setStatus('HTTP ' + res.status + ' error.', 'err'); return; }
-    let data;
-    try { data = JSON.parse(text); } catch(e) {
+    let parsed;
+    try { parsed = JSON.parse(text); } catch(e) {
       setStatus('Invalid JSON — click "Show raw response".', 'err');
       document.getElementById('rawBox').style.display = 'block';
       document.getElementById('rawBox').textContent = text.slice(0, 800);
       return;
     }
-    if (!Array.isArray(data) || !data.length) { setStatus('No data returned.', 'err'); return; }
+
+    // Response can be either the new shape {data, unmatchedCost, unmatchedCampaigns}
+    // or a legacy bare array — support both.
+    let data, unmatchedCost = 0, unmatchedCampaigns = [];
+    if (Array.isArray(parsed)) {
+      data = parsed;
+    } else if (parsed && Array.isArray(parsed.data)) {
+      data = parsed.data;
+      unmatchedCost = parsed.unmatchedCost || 0;
+      unmatchedCampaigns = parsed.unmatchedCampaigns || [];
+    } else {
+      data = [];
+    }
+
+    if (!data.length) { setStatus('No data returned.', 'err'); return; }
     locations = data;
     document.getElementById('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString();
     setStatus('Connected — ' + locations.length + ' locations.', 'ok');
+    renderUnmatchedBanner(unmatchedCost, unmatchedCampaigns);
     calculate();
   } catch(e) {
     lastRaw = e.toString();
