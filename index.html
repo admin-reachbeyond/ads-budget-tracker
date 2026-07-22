@@ -84,6 +84,8 @@ tbody tr:hover td { background: var(--bg); }
 .unmatched-banner .ub-title { font-size: 13px; font-weight: 600; color: var(--amber); margin-bottom: 4px; }
 .unmatched-banner .ub-detail { font-size: 12px; color: var(--amber); opacity: .9; }
 .unmatched-banner .ub-list { margin-top: 8px; font-size: 11px; color: var(--amber); opacity: .85; }
+tr.synthetic-row td { background: var(--teal-bg) !important; }
+tr.synthetic-row:hover td { background: var(--teal-bg) !important; }
 @media (max-width: 900px) { .metrics { grid-template-columns: 1fr 1fr; } .main { padding: 1rem; } }
 </style>
 </head>
@@ -206,6 +208,17 @@ const STORAGE_KEY = 'ads_allocated_budgets_v1';
 const URL_KEY = 'ads_master_url_v1';
 let locations = [], allocated = {}, chartInst = null, lastRaw = '';
 
+// Synthetic "state summary" rows: an extra row that COMBINES the data from
+// the listed locations for display purposes only. These rows are appended
+// to the table-only `enriched` array after totals have already been
+// calculated from the real per-location data, so they are always excluded
+// from the summary metrics at the top of the dashboard and from the chart.
+// Matching is case-insensitive so minor capitalization differences in the
+// feed don't silently break the row.
+const STATE_SUMMARIES = {
+  'WA State': ['Subiaco', 'Perth']
+};
+
 function sym() { return document.getElementById('currency').value; }
 function fmt(n) { return (n < 0 ? '-' : '') + sym() + Math.round(Math.abs(n)).toLocaleString(); }
 function fmtD(n) { return fmt(n) + '/day'; }
@@ -299,11 +312,63 @@ async function fetchData() {
 
 let enriched = [];
 
+// Builds display-only summary rows (e.g. "WA State") from already-enriched
+// real location rows. Must be called AFTER totals have been calculated, and
+// its output must only ever be appended to `enriched` for table/render
+// purposes — never fed back into `locations` or the totals math.
+function buildStateSummaryRows(list) {
+  const rows = [];
+  const exp = expectedPct();
+  const dl = daysLeft();
+
+  Object.entries(STATE_SUMMARIES).forEach(([summaryLabel, members]) => {
+    const memberSet = members.map(m => m.trim().toLowerCase());
+    const parts = list.filter(c => memberSet.includes((c.location || '').trim().toLowerCase()));
+    if (!parts.length) return; // none of the member locations are in this feed (yet)
+
+    const platformBudget = parts.reduce((s, c) => s + (c.platformBudget || 0), 0);
+    const allocatedBudget = parts.reduce((s, c) => s + (c.allocatedBudget || 0), 0);
+    const spent = parts.reduce((s, c) => s + (c.spent || 0), 0);
+
+    // Merge platform breakdown tags (e.g. G-Ads 1 / G-Ads 2 / MSFT) across the combined locations
+    const platforms = {};
+    parts.forEach(c => {
+      Object.entries(c.platforms || {}).forEach(([p, v]) => {
+        if (!platforms[p]) platforms[p] = { spent: 0 };
+        platforms[p].spent += v.spent || 0;
+      });
+    });
+
+    const varD = allocatedBudget - spent;
+    const pctUsed = allocatedBudget > 0 ? (spent / allocatedBudget) * 100 : 0;
+    const pace = Math.round(pctUsed) - Math.round(exp);
+    let label, cls;
+    if (!allocatedBudget)          { label = 'No budget'; cls = 'b-na'; }
+    else if (Math.abs(pace) <= 2)  { label = 'On track';  cls = 'b-ok'; }
+    else if (pace > 2)             { label = 'Ahead';     cls = 'b-ahead'; }
+    else                           { label = 'Behind';    cls = 'b-warn'; }
+    const dailyNeeded = dl > 0 && allocatedBudget > 0 ? Math.max(0, (allocatedBudget - spent) / dl) : 0;
+
+    rows.push({
+      location: summaryLabel,
+      platformBudget, allocatedBudget, spent, varD, pctUsed, pace, label, cls, dailyNeeded,
+      platforms,
+      synthetic: true,
+      summaryOf: members
+    });
+  });
+
+  return rows;
+}
+
 function calculate() {
   if (!locations.length) return;
   const exp = expectedPct(), dl = daysLeft();
   let totalPlatform = 0, totalAllocated = 0, totalSpent = 0;
 
+  // Totals below are accumulated ONLY from real per-location data.
+  // Synthetic summary rows are appended to `enriched` further down,
+  // strictly after this block, so they can never affect these totals.
   enriched = locations.map(loc => {
     const pb = loc.platformBudget || 0;
     const ab = allocated[loc.location] || loc.allocatedBudget || 0;
@@ -333,6 +398,9 @@ function calculate() {
   re.className = 'metric-value ' + (rem >= 0 ? 'good' : 'bad');
   document.getElementById('mDays').textContent = dl;
 
+  // Append display-only summary rows (e.g. "WA State") AFTER totals are locked in.
+  enriched = enriched.concat(buildStateSummaryRows(enriched));
+
   renderTable();
   renderChart();
 }
@@ -351,6 +419,9 @@ function renderTable() {
   });
 
   data.sort((a, b) => {
+    // Synthetic summary rows always sort to the bottom, regardless of the
+    // chosen sort order, so they stay visually separate from real locations.
+    if (!!a.synthetic !== !!b.synthetic) return a.synthetic ? 1 : -1;
     if (sort === 'spent-desc')    return b.spent - a.spent;
     if (sort === 'pct-desc')      return b.pctUsed - a.pctUsed;
     if (sort === 'variance-desc') return a.varD - b.varD;
@@ -378,14 +449,11 @@ function renderTable() {
       return `<span class="ptag">${label}: ${fmt(v.spent)}</span>`;
     }).join('');
 
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>
-        <div class="loc-name">${c.location}</div>
-        <div class="platform-tags">${tags}</div>
-      </td>
-      <td>${fmt(c.platformBudget)}</td>
-      <td>
+    // Synthetic (e.g. "WA State") rows get a plain, non-editable allocated budget
+    // cell and a note clarifying they're excluded from totals above.
+    const allocCell = c.synthetic
+      ? `<div style="padding:3px 6px;font-size:13px;color:var(--text)">${c.allocatedBudget ? fmt(c.allocatedBudget) : '—'}</div>`
+      : `
         <div style="position:relative">
           <span class="alloc-display" data-loc="${c.location}"
             onclick="startEdit(this)"
@@ -397,8 +465,18 @@ function renderTable() {
             onchange="updateAllocated(this)"
             onblur="stopEdit(this)"
             style="display:none;width:100%" />
-        </div>
+        </div>`;
+
+    const tr = document.createElement('tr');
+    if (c.synthetic) tr.className = 'synthetic-row';
+    tr.innerHTML = `
+      <td>
+        <div class="loc-name">${c.location}${c.synthetic ? ' <span class="ptag" style="background:var(--teal-bg);color:var(--teal);border-color:var(--teal)">Summary</span>' : ''}</div>
+        <div class="platform-tags">${tags}</div>
+        ${c.synthetic ? `<div style="font-size:10px;color:var(--faint);margin-top:3px">Combines ${(c.summaryOf || []).join(' + ')} — excluded from totals above</div>` : ''}
       </td>
+      <td>${fmt(c.platformBudget)}</td>
+      <td>${allocCell}</td>
       <td>${c.allocatedDailyBudget ? fmtD(c.allocatedDailyBudget) : '—'}</td>
       <td>${fmt(c.spent)}</td>
       <td><span class="badge ${varClass}">${c.varD >= 0 ? '+' : ''}${fmt(c.varD)}</span></td>
@@ -423,7 +501,9 @@ function updateAllocated(input) {
 }
 
 function renderChart() {
-  const top15 = [...enriched].sort((a, b) => b.spent - a.spent).slice(0, 15);
+  // Synthetic summary rows are excluded from the chart so combined spend
+  // (e.g. WA State) isn't shown alongside its own already-counted components.
+  const top15 = [...enriched].filter(c => !c.synthetic).sort((a, b) => b.spent - a.spent).slice(0, 15);
   const exp = expectedPct();
   const canvas = document.getElementById('theChart');
   if (chartInst) chartInst.destroy();
@@ -469,7 +549,7 @@ function exportCSV() {
   const dl = daysLeft();
   enriched.forEach(c => {
     rows.push([
-      c.location,
+      c.synthetic ? c.location + ' (State Summary — excluded from totals)' : c.location,
       Math.round(c.platformBudget),
       c.allocatedBudget || '',
       Math.round(c.spent * 100) / 100,
