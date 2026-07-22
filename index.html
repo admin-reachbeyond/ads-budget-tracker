@@ -328,6 +328,7 @@ function buildStateSummaryRows(list) {
 
     const platformBudget = parts.reduce((s, c) => s + (c.platformBudget || 0), 0);
     const allocatedBudget = parts.reduce((s, c) => s + (c.allocatedBudget || 0), 0);
+    const allocatedDailyBudget = parts.reduce((s, c) => s + (c.allocatedDailyBudget || 0), 0);
     const spent = parts.reduce((s, c) => s + (c.spent || 0), 0);
 
     // Merge platform breakdown tags (e.g. G-Ads 1 / G-Ads 2 / MSFT) across the combined locations
@@ -351,7 +352,7 @@ function buildStateSummaryRows(list) {
 
     rows.push({
       location: summaryLabel,
-      platformBudget, allocatedBudget, spent, varD, pctUsed, pace, label, cls, dailyNeeded,
+      platformBudget, allocatedBudget, allocatedDailyBudget, spent, varD, pctUsed, pace, label, cls, dailyNeeded,
       platforms,
       synthetic: true,
       summaryOf: members
