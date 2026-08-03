@@ -84,6 +84,9 @@ tbody tr:hover td { background: var(--bg); }
 .unmatched-banner .ub-title { font-size: 13px; font-weight: 600; color: var(--amber); margin-bottom: 4px; }
 .unmatched-banner .ub-detail { font-size: 12px; color: var(--amber); opacity: .9; }
 .unmatched-banner .ub-list { margin-top: 8px; font-size: 11px; color: var(--amber); opacity: .85; }
+.stale-banner { background: var(--red-bg); border: 1px solid #e2a3a3; border-radius: var(--radius); padding: 12px 16px; margin-bottom: 1.25rem; display: none; }
+.stale-banner .sb-title { font-size: 13px; font-weight: 600; color: var(--red); margin-bottom: 4px; }
+.stale-banner .sb-detail { font-size: 12px; color: var(--red); opacity: .9; line-height: 1.6; }
 tr.synthetic-row td { background: var(--teal-bg) !important; }
 tr.synthetic-row:hover td { background: var(--teal-bg) !important; }
 @media (max-width: 900px) { .metrics { grid-template-columns: 1fr 1fr; } .main { padding: 1rem; } }
@@ -108,7 +111,7 @@ tr.synthetic-row:hover td { background: var(--teal-bg) !important; }
     <div class="grid2">
       <div>
         <div class="field-label">Master Apps Script URL</div>
-        <input id="scriptUrl" value="https://script.google.com/macros/s/AKfycbymwQCIIvsx_FDHdxhaGXUPVPQUJ_c89ixz1DFLMcsrRXUqW-zadNI7E_oi_ZHhg9zcUg/exec" />
+        <input id="scriptUrl" value="https://script.google.com/macros/s/AKfycbz9bTAsVJn0ecYsUntfaw_kroI8UQJ5OACoxLO9YKZxZwxpT4ymVEjKMhhkV0-fUsHSjQ/exec" />
       </div>
       <div>
         <div class="field-label">Currency</div>
@@ -127,6 +130,12 @@ tr.synthetic-row:hover td { background: var(--teal-bg) !important; }
     </div>
     <div class="raw-box" id="rawBox"></div>
     <p class="hint">Open this file in Chrome. Data auto-loads on open. Allocated budgets are saved in your browser — enter them once and they persist. Microsoft Ads spend will be added once the email reader is set up.</p>
+  </div>
+
+  <!-- Stale source data warning -->
+  <div class="stale-banner" id="staleBanner">
+    <div class="sb-title">⚠ A data source hasn't updated today</div>
+    <div class="sb-detail" id="staleDetail"></div>
   </div>
 
   <!-- Unmatched spend warning -->
@@ -232,8 +241,15 @@ function setStatus(msg, state) {
 }
 
 function loadSaved() {
+  // The hardcoded default in the HTML above is always the source of truth —
+  // it gets updated every time the Master Aggregator is redeployed. We only
+  // fall back to a saved localStorage URL if the field somehow has no
+  // default value at all, so a stale saved URL from a previous deployment
+  // can never silently override the current correct one.
   try { const b = localStorage.getItem(STORAGE_KEY); if (b) allocated = JSON.parse(b); } catch {}
-  try { const u = localStorage.getItem(URL_KEY); if (u) document.getElementById('scriptUrl').value = u; } catch {}
+  const field = document.getElementById('scriptUrl');
+  if (field.value.trim()) return;
+  try { const u = localStorage.getItem(URL_KEY); if (u) field.value = u; } catch {}
 }
 
 function persist() {
@@ -262,6 +278,45 @@ function renderUnmatchedBanner(unmatchedCost, unmatchedCampaigns) {
   document.getElementById('unmatchedList').textContent = list;
 }
 
+// Flags any source whose underlying spreadsheet wasn't touched today —
+// e.g. a scheduled Google Ads export that silently didn't run, which
+// otherwise looks identical to a normal, fully up-to-date day.
+function renderStaleBanner(sourceLastUpdated) {
+  const banner = document.getElementById('staleBanner');
+  if (!sourceLastUpdated || typeof sourceLastUpdated !== 'object') {
+    banner.style.display = 'none';
+    return;
+  }
+
+  const todayStr = new Date().toDateString();
+  const staleSources = [];
+
+  Object.entries(sourceLastUpdated).forEach(([name, iso]) => {
+    if (!iso) {
+      staleSources.push(`${name} (no timestamp available)`);
+      return;
+    }
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) {
+      staleSources.push(`${name} (unrecognized timestamp)`);
+      return;
+    }
+    if (d.toDateString() !== todayStr) {
+      staleSources.push(`${name} — last updated ${d.toLocaleString()}`);
+    }
+  });
+
+  if (!staleSources.length) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  banner.style.display = 'block';
+  document.getElementById('staleDetail').innerHTML =
+    'The figures below may be showing yesterday\'s numbers for these sources: <br>' +
+    staleSources.join('<br>');
+}
+
 async function fetchData() {
   const urlBase = document.getElementById('scriptUrl').value.trim();
   if (!urlBase) { setStatus('Paste your Apps Script URL above.', 'err'); return; }
@@ -285,15 +340,16 @@ async function fetchData() {
       return;
     }
 
-    // Response can be either the new shape {data, unmatchedCost, unmatchedCampaigns}
+    // Response can be either the new shape {data, unmatchedCost, unmatchedCampaigns, sourceLastUpdated}
     // or a legacy bare array — support both.
-    let data, unmatchedCost = 0, unmatchedCampaigns = [];
+    let data, unmatchedCost = 0, unmatchedCampaigns = [], sourceLastUpdated = null;
     if (Array.isArray(parsed)) {
       data = parsed;
     } else if (parsed && Array.isArray(parsed.data)) {
       data = parsed.data;
       unmatchedCost = parsed.unmatchedCost || 0;
       unmatchedCampaigns = parsed.unmatchedCampaigns || [];
+      sourceLastUpdated = parsed.sourceLastUpdated || null;
     } else {
       data = [];
     }
@@ -303,6 +359,7 @@ async function fetchData() {
     document.getElementById('lastSync').textContent = 'Synced ' + new Date().toLocaleTimeString();
     setStatus('Connected — ' + locations.length + ' locations.', 'ok');
     renderUnmatchedBanner(unmatchedCost, unmatchedCampaigns);
+    renderStaleBanner(sourceLastUpdated);
     calculate();
   } catch(e) {
     lastRaw = e.toString();
