@@ -87,6 +87,9 @@ tbody tr:hover td { background: var(--bg); }
 .stale-banner { background: var(--red-bg); border: 1px solid #e2a3a3; border-radius: var(--radius); padding: 12px 16px; margin-bottom: 1.25rem; display: none; }
 .stale-banner .sb-title { font-size: 13px; font-weight: 600; color: var(--red); margin-bottom: 4px; }
 .stale-banner .sb-detail { font-size: 12px; color: var(--red); opacity: .9; line-height: 1.6; }
+.error-banner { background: #fff0f0; border: 1px solid #d98c8c; border-radius: var(--radius); padding: 12px 16px; margin-bottom: 1.25rem; display: none; }
+.error-banner .eb-title { font-size: 13px; font-weight: 700; color: #8a1f1f; margin-bottom: 4px; }
+.error-banner .eb-detail { font-size: 12px; color: #8a1f1f; opacity: .95; line-height: 1.6; }
 tr.synthetic-row td { background: var(--teal-bg) !important; }
 tr.synthetic-row:hover td { background: var(--teal-bg) !important; }
 @media (max-width: 900px) { .metrics { grid-template-columns: 1fr 1fr; } .main { padding: 1rem; } }
@@ -111,7 +114,7 @@ tr.synthetic-row:hover td { background: var(--teal-bg) !important; }
     <div class="grid2">
       <div>
         <div class="field-label">Master Apps Script URL</div>
-        <input id="scriptUrl" value="https://script.google.com/macros/s/AKfycbyXKdoBj7JHD5D13ZHE2f5HiWbtTKQF6e-JuI3Qcqeh4TNZ3j0bGptjSnAWvzD-r_Q01Q/exec" />
+        <input id="scriptUrl" value="https://script.google.com/macros/s/AKfycbzgjNeUh1WzG53q78t3tGQJBC5Zy6ulRF24_I1NjLqpWoMjRrZHPyisiM5F88jWW2Csjg/exec" />
       </div>
       <div>
         <div class="field-label">Currency</div>
@@ -132,7 +135,13 @@ tr.synthetic-row:hover td { background: var(--teal-bg) !important; }
     <p class="hint">Open this file in Chrome. Data auto-loads on open. Allocated budgets are saved in your browser — enter them once and they persist. Combines Google Ads (both accounts) and Microsoft Ads.</p>
   </div>
 
-  <!-- Stale source data warning -->
+  <!-- Source fetch error warning (a source actually failed on this run) -->
+  <div class="error-banner" id="errorBanner">
+    <div class="eb-title">✕ A data source failed to load this time</div>
+    <div class="eb-detail" id="errorDetail"></div>
+  </div>
+
+  <!-- Stale source data warning (source responded, but with old data) -->
   <div class="stale-banner" id="staleBanner">
     <div class="sb-title">⚠ A data source hasn't updated today</div>
     <div class="sb-detail" id="staleDetail"></div>
@@ -317,6 +326,26 @@ function renderStaleBanner(sourceLastUpdated) {
     staleSources.join('<br>');
 }
 
+// Flags any source that genuinely FAILED to fetch on this specific run
+// (HTTP error, timeout, invalid/unexpected response) — distinct from the
+// staleness banner above, which covers a source that responded fine but
+// with old data. This is what would have caught this morning's Account 1
+// timeout the moment it happened, instead of only being visible by manually
+// digging through the Apps Script execution log.
+function renderErrorBanner(sourceErrors) {
+  const banner = document.getElementById('errorBanner');
+  if (!sourceErrors || typeof sourceErrors !== 'object' || !Object.keys(sourceErrors).length) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  banner.style.display = 'block';
+  const lines = Object.entries(sourceErrors).map(([name, err]) => `${name}: ${err}`);
+  document.getElementById('errorDetail').innerHTML =
+    'These sources failed to load on this fetch — the figures below may be missing their spend entirely. Try refreshing: <br>' +
+    lines.join('<br>');
+}
+
 async function fetchData() {
   const urlBase = document.getElementById('scriptUrl').value.trim();
   if (!urlBase) { setStatus('Paste your Apps Script URL above.', 'err'); return; }
@@ -340,9 +369,9 @@ async function fetchData() {
       return;
     }
 
-    // Response can be either the new shape {data, unmatchedCost, unmatchedCampaigns, sourceLastUpdated}
+    // Response can be either the new shape {data, unmatchedCost, unmatchedCampaigns, sourceLastUpdated, sourceErrors}
     // or a legacy bare array — support both.
-    let data, unmatchedCost = 0, unmatchedCampaigns = [], sourceLastUpdated = null;
+    let data, unmatchedCost = 0, unmatchedCampaigns = [], sourceLastUpdated = null, sourceErrors = null;
     if (Array.isArray(parsed)) {
       data = parsed;
     } else if (parsed && Array.isArray(parsed.data)) {
@@ -350,6 +379,7 @@ async function fetchData() {
       unmatchedCost = parsed.unmatchedCost || 0;
       unmatchedCampaigns = parsed.unmatchedCampaigns || [];
       sourceLastUpdated = parsed.sourceLastUpdated || null;
+      sourceErrors = parsed.sourceErrors || null;
     } else {
       data = [];
     }
@@ -360,6 +390,7 @@ async function fetchData() {
     setStatus('Connected — ' + locations.length + ' locations.', 'ok');
     renderUnmatchedBanner(unmatchedCost, unmatchedCampaigns);
     renderStaleBanner(sourceLastUpdated);
+    renderErrorBanner(sourceErrors);
     calculate();
   } catch(e) {
     lastRaw = e.toString();
